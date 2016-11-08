@@ -67,8 +67,7 @@ var width, height;
 
     var init = function() {
         // TODO: For performance measurements, disable debug mode!
-        //var debugMode = true;
-        var debugMode = false;
+        var debugMode = true;
 
         canvas = document.getElementById('canvas');
         renderer = new THREE.WebGLRenderer({
@@ -78,7 +77,6 @@ var width, height;
         gl = renderer.context;
 
         if (debugMode) {
-            $('#dlbutton button').attr('disabled', false);
             $('#debugmodewarning').css('display', 'block');
             var throwOnGLError = function(err, funcName, args) {
                 abort(WebGLDebugUtils.glEnumToString(err) +
@@ -124,24 +122,156 @@ var width, height;
             R.sphereModel = m;
         });
 
-        // CHECKITOUT: Load mesh and textures
-        loadModel('models/sponza/sponza.obj', function(o) {
-            scene.add(o);
-            uploadModel(o, function(m) {
-                // CHECKITOUT: load textures
-                loadTexture('models/sponza/color.jpg').then(function(tex) {
-                    m.colmap = tex;
-                });
-                loadTexture('models/sponza/normal.png').then(function(tex) {
-                    m.normap = tex;
-                });
-                models.push(m);
-            });
+        // var glTFURL = 'models/glTF-duck/duck.gltf';
+        var glTFURL = 'models/glTF-sponza-kai-fix/sponza.gltf';
+        var glTFLoader = new MinimalGLTFLoader.glTFLoader(gl);
+        glTFLoader.loadGLTF(glTFURL, function (glTF) {
+            var curScene = glTF.scenes[glTF.defaultScene];
+
+            var webGLTextures = {};
+
+            // temp var
+            var i,len;
+            var primitiveOrderID;
+
+            var mesh;
+            var primitive;
+            var vertexBuffer;
+            var indicesBuffer;
+
+
+            // textures setting
+            var textureID = 0;
+            var textureInfo;
+            var samplerInfo;
+            var target, format, internalFormat, type;   // texture info
+            var magFilter, minFilter, wrapS, wrapT;
+            var image;
+            var texture;
+
+
+            // temp for sponza
+            var colorTextureName = 'texture_color'; // for sponza
+            if (!glTF.json.textures[colorTextureName]) {
+                colorTextureName = (Object.keys(glTF.json.textures))[0];
+                console.log(colorTextureName);
+            }
+            var normalTextureName = 'texture_normal';
+
+            // textures
+            for (var tid in glTF.json.textures) {
+
+                textureInfo = glTF.json.textures[tid];
+                target = textureInfo.target || gl.TEXTURE_2D;
+                format = textureInfo.format || gl.RGBA;
+                internalFormat = textureInfo.format || gl.RGBA;
+                type = textureInfo.type || gl.UNSIGNED_BYTE;
+
+                image = glTF.images[textureInfo.source];
+
+                texture = gl.createTexture();
+                gl.activeTexture(gl.TEXTURE0 + textureID);
+                gl.bindTexture(target, texture);
+
+                switch(target) {
+                    case 3553: // gl.TEXTURE_2D
+                    gl.texImage2D(target, 0, internalFormat, format, type, image);
+                    break;
+                    // TODO for TA
+                }
+
+                // !! Sampler
+                // raw WebGL 1, no sampler object, set magfilter, wrapS, etc
+                samplerInfo = glTF.json.samplers[textureInfo.sampler];
+                minFilter = samplerInfo.minFilter || gl.NEAREST_MIPMAP_LINEAR;
+                magFilter = samplerInfo.magFilter || gl.LINEAR;
+                wrapS = samplerInfo.wrapS || gl.REPEAT;
+                wrapT = samplerInfo.wrapT || gl.REPEAT;
+                gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, minFilter);
+                gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, magFilter);
+                gl.texParameteri(target, gl.TEXTURE_WRAP_S, wrapS);
+                gl.texParameteri(target, gl.TEXTURE_WRAP_T, wrapT);
+                if (minFilter == gl.NEAREST_MIPMAP_NEAREST || 
+                    minFilter == gl.NEAREST_MIPMAP_LINEAR || 
+                    minFilter == gl.LINEAR_MIPMAP_NEAREST ||
+                    minFilter == gl.LINEAR_MIPMAP_LINEAR ) {
+                        gl.generateMipmap(target);
+                }
+
+
+                gl.bindTexture(target, null);
+
+                webGLTextures[tid] = {
+                    texture: texture,
+                    target: target,
+                    id: textureID
+                };
+
+                textureID++;
+            }
+
+
+            // vertex attributes
+            for (var mid in curScene.meshes) {
+                mesh = curScene.meshes[mid];
+
+                for (i = 0, len = mesh.primitives.length; i < len; ++i) {
+                    primitive = mesh.primitives[i];
+
+
+                    vertexBuffer = gl.createBuffer();
+                    indicesBuffer = gl.createBuffer();
+
+                    // initialize buffer
+                    var vertices = primitive.vertexBuffer;
+                    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+                    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+                    var indices = primitive.indices;
+                    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indicesBuffer);
+                    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+                    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+
+
+                    var posInfo = primitive.attributes[primitive.technique.parameters['position'].semantic];
+                    var norInfo = primitive.attributes[primitive.technique.parameters['normal'].semantic];
+                    var uvInfo;
+                    if (primitive.technique.parameters['texcoord_0']) {
+                        uvInfo = primitive.attributes[primitive.technique.parameters['texcoord_0'].semantic];
+                    } else if (primitive.technique.parameters['texcoord0']) {
+                        uvInfo = primitive.attributes[primitive.technique.parameters['texcoord0'].semantic];
+                    }
+                    
+
+                    models.push({
+                        gltf: primitive,
+
+                        idx: indicesBuffer,
+
+                        interleaved: true,
+
+                        attributes: vertexBuffer,
+                        posInfo: {size: posInfo.size, type: posInfo.type, stride: posInfo.stride, offset: posInfo.offset},
+                        norInfo: {size: norInfo.size, type: norInfo.type, stride: norInfo.stride, offset: norInfo.offset},
+                        uvInfo: {size: uvInfo.size, type: uvInfo.type, stride: uvInfo.stride, offset: uvInfo.offset},
+
+                        // specific textures temp test
+                        colmap: webGLTextures[colorTextureName].texture, 
+                        normap: webGLTextures[normalTextureName] ? webGLTextures[normalTextureName].texture : null
+                    });
+
+                }
+
+            }
+
+
+            
         });
 
-        // Render once to get three.js to copy all of the model buffers
+
         resize();
-        renderer.render(scene, camera);
+        // renderer.render(scene, camera);
 
         gl.clearColor(0.5, 0.5, 0.5, 0.5);
         gl.clearDepth(1.0);
@@ -197,9 +327,21 @@ var width, height;
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gidx);
             gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
 
+            // var m = {
+            //     idx: gidx,
+            //     elemCount: idx.length,
+            //     position: gposition,
+            //     normal: gnormal,
+            //     uv: guv
+            // };
+
+            // adapt to new readyModelForDraw and drawReadyModel (glTF version)
             var m = {
                 idx: gidx,
                 elemCount: idx.length,
+
+                interleaved: false,
+
                 position: gposition,
                 normal: gnormal,
                 uv: guv

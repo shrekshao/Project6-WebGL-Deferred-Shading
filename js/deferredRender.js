@@ -184,6 +184,15 @@
         {
             gl.uniform1f(phongProg.u_toonShading ,cfg.enableToon );
             gl.uniform3f( phongProg.u_cameraPos,state.cameraPos.x,state.cameraPos.y,state.cameraPos.z );
+            
+            if (cfg.proxy == 2) {
+                readyModelForDraw(R.prog_BlinnPhong_PointLight_SphereProxy, R.sphereModel);
+            }
+            
+        } else {
+            if (cfg.proxy == 2) {
+                readyModelForDraw(R.progRedSphere, R.sphereModel);
+            }
         }
         
         
